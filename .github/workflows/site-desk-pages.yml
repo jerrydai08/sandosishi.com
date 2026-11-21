@@ -1,0 +1,57 @@
+# Managed by Site Desk. Deploys a site bundle prepared and reviewed on the owner's Mac.
+# The bundle travels as an asset on a temporary *draft* release (visible only to repo writers),
+# is checked against the expected SHA-256, deployed with the official Pages actions, and then
+# the release, run and artifact are deleted by Site Desk. Site content is never committed.
+name: Site Desk publish
+run-name: Site Desk publish ${{ inputs.publish_id }}
+on:
+  workflow_dispatch:
+    inputs:
+      publish_id:
+        required: true
+        type: string
+      asset_id:
+        required: true
+        type: string
+      sha256:
+        required: true
+        type: string
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+concurrency:
+  group: site-desk-pages
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Fetch and verify bundle
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ASSET_ID: ${{ inputs.asset_id }}
+          EXPECTED: ${{ inputs.sha256 }}
+        run: |
+          set -euo pipefail
+          [[ "$ASSET_ID" =~ ^[0-9]+$ ]] || { echo "bad asset id"; exit 1; }
+          [[ "$EXPECTED" =~ ^[0-9a-f]{64}$ ]] || { echo "bad checksum"; exit 1; }
+          curl -fsSL --retry 5 --retry-all-errors -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/octet-stream" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/releases/assets/$ASSET_ID" -o "$RUNNER_TEMP/site.tar.gz"
+          echo "$EXPECTED  $RUNNER_TEMP/site.tar.gz" | sha256sum -c --quiet
+          mkdir -p "$RUNNER_TEMP/pages"
+          gunzip -c "$RUNNER_TEMP/site.tar.gz" > "$RUNNER_TEMP/pages/artifact.tar"
+      - name: Upload Pages artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: github-pages
+          path: ${{ runner.temp }}/pages/artifact.tar
+          retention-days: 1
+          if-no-files-found: error
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
