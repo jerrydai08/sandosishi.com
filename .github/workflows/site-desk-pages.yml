@@ -29,7 +29,7 @@ jobs:
     timeout-minutes: 15
     environment:
       name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+      url: ${{ steps.deployment.outputs.page_url || steps.first.outputs.page_url }}
     steps:
       - name: Fetch and verify bundle
         env:
@@ -52,6 +52,17 @@ jobs:
           path: ${{ runner.temp }}/pages/artifact.tar
           retention-days: 1
           if-no-files-found: error
+      # GitHub can take a moment before a just-uploaded artifact is visible to the deploy step
+      - name: Let the artifact settle
+        run: sleep 5
       - name: Deploy to GitHub Pages
+        id: first
+        continue-on-error: true
+        uses: actions/deploy-pages@v4
+      - name: Wait before retrying
+        if: steps.first.outcome == 'failure'
+        run: sleep 20
+      - name: Deploy to GitHub Pages (retry)
         id: deployment
+        if: steps.first.outcome == 'failure'
         uses: actions/deploy-pages@v4
